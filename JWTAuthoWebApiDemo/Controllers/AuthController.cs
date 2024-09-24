@@ -1,4 +1,5 @@
 ﻿using JWTAuthoWebApiDemo.Core.DTOs;
+using JWTAuthoWebApiDemo.Core.Interfaces;
 using JWTAuthoWebApiDemo.Core.OtherObjects;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -18,12 +19,14 @@ namespace JWTAuthoWebApiDemo.Controllers
     {
         private readonly UserManager<IdentityUser> _userManager;
         private readonly RoleManager<IdentityRole> _roleManager;
+        private readonly IAuthService _authService;
         private readonly IConfiguration _config;
-        public AuthController(UserManager<IdentityUser> userManager, RoleManager<IdentityRole> roleManager, IConfiguration config)
+        public AuthController(UserManager<IdentityUser> userManager, RoleManager<IdentityRole> roleManager, IConfiguration config, IAuthService authService)
         {
             _userManager = userManager;
             _roleManager = roleManager;
             _config = config;
+            _authService = authService;
         }
 
         // Role for seeding my roles to DB
@@ -52,33 +55,12 @@ namespace JWTAuthoWebApiDemo.Controllers
 
         public async Task<IActionResult> Register([FromBody] RegisterDTO registordto)
         {
-            var isExitsUser = await _userManager.FindByNameAsync(registordto.UserName);
-            if (isExitsUser !=null)
-            
-                return BadRequest("UserName already Exists");
+            var result = await _authService.RegisterAsync(registordto);
 
-            IdentityUser newUser = new IdentityUser()
-            {
-                Email = registordto.Email,
-                UserName = registordto.UserName,
-                SecurityStamp = Guid.NewGuid().ToString(),
-            };
+            if (result.IsSucceed)
+                return Ok(result);
 
-            var createUserResult = await _userManager.CreateAsync(newUser, registordto.Password);
-
-           if(!createUserResult.Succeeded)
-            {
-                var errorString = "User creation Failed Because:";
-                foreach (var error in createUserResult.Errors)
-                {
-                    errorString += " # " + error.Description;
-                }
-                return BadRequest(errorString);
-            }
-
-            await _userManager.AddToRoleAsync(newUser, StaticUserRoles.USER);
-
-            return Ok("User created Successfully");
+            return BadRequest(result.ToString());
         }
 
         [HttpPost]
@@ -86,89 +68,49 @@ namespace JWTAuthoWebApiDemo.Controllers
 
         public async Task<IActionResult> Login([FromBody] LoginDTO login)
         {
-            var user = await _userManager.FindByNameAsync(login.UserName);
-            if (user == null)
-                return Unauthorized("Invalid Credentials");
+            var result = await _authService.LoginAsync(login);
+           
+            if (result.IsSucceed)
+                return Ok(result);
 
-            var isPasswordCorrect = await _userManager.CheckPasswordAsync(user, login.Password);
-
-            if (!isPasswordCorrect)
-                return Unauthorized("Invalid Credentials ");
-
-            var userRoles = await _userManager.GetRolesAsync(user);
-
-            var authClaims = new List<Claim>
-            {
-                new Claim(ClaimTypes.Name, user.UserName),
-                new Claim(ClaimTypes.NameIdentifier, user.Id),
-                new Claim("JWTID", Guid.NewGuid().ToString()),
-            };
-
-            foreach (var userRole in userRoles)
-            {
-                authClaims.Add(new Claim(ClaimTypes.Role, userRole));
-            }
-            var token = GenerateNewjsonWebToken(authClaims);
-
-            return Ok(token);
+            return BadRequest(result);
+           
         }
 
 
         public async Task<IActionResult> MakeOwner([FromBody] UpdatePermissionDTO updatePermission)
         {
-            var user = await _userManager.FindByNameAsync(updatePermission.UserName);
-            if (user is null)
-            {
-                return BadRequest("Invalid User Name!!");
-            }
-            await _userManager.AddToRoleAsync(user, StaticUserRoles.OWNER);
+            var result = await _authService.MakeAdminAsync(updatePermission);
 
-            return Ok("User is now an Owner");
-            
+            if (result.IsSucceed)
+                return Ok(result);
+
+            return BadRequest(result);
+
         }
 
         public async Task<IActionResult> MakeUser([FromBody] UpdatePermissionDTO updatePermission)
         {
-            var user = await _userManager.FindByNameAsync(updatePermission.UserName);
-            if (user is null)
-            {
-                return BadRequest("Invalid User Name!!");
-            }
-            await _userManager.AddToRoleAsync(user, StaticUserRoles.USER);
+            var result = await _authService.MakeUserAsync(updatePermission);
 
-            return Ok("User is now an User");
+            if (result.IsSucceed)
+                return Ok(result);
+
+            return BadRequest(result);
 
         }
 
         public async Task<IActionResult> MakeAdmin([FromBody] UpdatePermissionDTO updatePermission)
         {
-            var user = await _userManager.FindByNameAsync(updatePermission.UserName);
-            if (user is null)
-            {
-                return BadRequest("Invalid User Name!!");
-            }
-            await _userManager.AddToRoleAsync(user, StaticUserRoles.ADMIN);
+            var result = await _authService.MakeAdminAsync(updatePermission);
 
-            return Ok("User is now an Admin");
+            if (result.IsSucceed)
+                return Ok(result);
+
+            return BadRequest(result);
 
         }
-        private string GenerateNewjsonWebToken(List<Claim> claims)
-        {
-            var authSecret = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_config["JWT:Secret"]));
-
-            var tokenObject = new JwtSecurityToken(
-                 issuer: _config["JWT:ValidIssuer"],
-                 audience: _config["JWT:ValidAudience"],
-                 expires: DateTime.Now.AddHours(1),
-                 claims: claims,
-                 signingCredentials: new SigningCredentials(authSecret, SecurityAlgorithms.HmacSha256)
-                ); 
-
-            string token = new JwtSecurityTokenHandler().WriteToken(tokenObject);
-
-            return token;
-
-        }
+      
 
     }
 }
